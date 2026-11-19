@@ -1,0 +1,64 @@
+name: Caps Lock PR macOS verification
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_sha:
+        description: "Commit SHA to validate from this fork"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  native-and-ui:
+    name: Swift, Xcode build and macOS tests
+    runs-on: macos-26
+    timeout-minutes: 60
+    steps:
+      - name: Checkout selected commit
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.target_sha }}
+          submodules: recursive
+          lfs: true
+          persist-credentials: false
+
+      - name: Toolchain
+        run: |
+          uname -a
+          swift --version
+          xcodebuild -version
+
+      - name: Core Swift tests
+        run: swift test --package-path Core --jobs 3
+
+      - name: Native macOS application build
+        run: |
+          xcodebuild -project azooKeyMac.xcodeproj \
+            -scheme azooKeyMac \
+            -configuration Debug \
+            -destination 'generic/platform=macOS' \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" build
+
+      - name: Xcode unit and UI tests
+        run: |
+          xcodebuild -project azooKeyMac.xcodeproj \
+            -scheme azooKeyMac \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
+            -resultBundlePath "$RUNNER_TEMP/caps-lock-tests.xcresult" \
+            CODE_SIGNING_ALLOWED=NO CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" test
+
+      - name: Upload native test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: caps-lock-native-results
+          path: ${{ runner.temp }}/caps-lock-tests.xcresult
+          if-no-files-found: ignore
+          retention-days: 7
